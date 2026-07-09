@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running log</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏃</text></svg>">
+<style>
+  :root {
+    --page:           #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series-1:       #2a78d6;
+    --series-1-lift:  #5598e7;
+    --critical:       #d03b3b;
+    --hover-wash:     rgba(11, 11, 11, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:           #0d0d0d;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series-1:       #3987e5;
+      --series-1-lift:  #6da7ec;
+      --critical:       #e66767;
+      --hover-wash:     rgba(255, 255, 255, 0.06);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .app { max-width: 880px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header .sub { color: var(--text-muted); font-size: 12px; margin: 2px 0 0; }
+  .header-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    border: 0; background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 13px; padding: 5px 12px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--series-1); color: #fff; }
+  .seg button:not([aria-pressed="true"]):hover { background: var(--hover-wash); }
+
+  .btn {
+    border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+  }
+  .btn:hover { background: var(--hover-wash); }
+  .btn-primary { background: var(--series-1); border-color: transparent; color: #fff; font-weight: 600; padding: 8px 18px; }
+  .btn-primary:hover { background: var(--series-1); filter: brightness(1.08); }
+  .btn-text { border: 0; background: none; padding: 4px 6px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 13px; }
+  .btn-text:hover { background: var(--hover-wash); }
+  .btn-text.danger { color: var(--critical); }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card .card-sub { color: var(--text-muted); font-size: 12px; margin: 0 0 14px; }
+
+  /* Stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .tile .label { font-size: 12px; color: var(--text-secondary); }
+  .tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .tile .value .unit { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-left: 2px; }
+
+  /* Form */
+  form.add-run { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+  .field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .field input {
+    width: 100%; font: inherit; color: var(--text-primary);
+    background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  }
+  .field input:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  .field-notes { grid-column: 1 / -1; }
+  .form-actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; }
+  .form-error { color: var(--critical); font-size: 13px; }
+
+  /* Chart */
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { display: block; width: 100%; }
+  .chart-empty { color: var(--text-muted); font-size: 13px; padding: 32px 0; text-align: center; }
+  .bar { fill: var(--series-1); pointer-events: none; }
+  .bar.lift { fill: var(--series-1-lift); }
+  .hit { fill: transparent; cursor: default; }
+  .hit:focus { outline: none; }
+  .hit:focus-visible + .bar, .hit:focus + .bar { fill: var(--series-1-lift); }
+  .gridline { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+  .axis-baseline { stroke: var(--baseline); stroke-width: 1; shape-rendering: crispEdges; }
+  .tick-label, .x-label { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .cap-label { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.14);
+    white-space: nowrap; visibility: hidden;
+  }
+  .tooltip .tt-value { font-weight: 600; font-size: 14px; }
+  .tooltip .tt-label { color: var(--text-secondary); font-size: 12px; }
+
+  /* History table */
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 500; color: var(--text-secondary); padding: 6px 10px; border-bottom: 1px solid var(--grid); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--grid); font-size: 13.5px; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  td.notes-cell { color: var(--text-secondary); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.actions { text-align: right; white-space: nowrap; }
+  .table-empty { color: var(--text-muted); font-size: 13px; padding: 24px 0; text-align: center; }
+
+  footer { color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Running log</h1>
+      <p class="sub">Track your runs — distance, time, and pace</p>
+    </div>
+    <div class="header-controls">
+      <div class="seg" role="group" aria-label="Distance unit">
+        <button type="button" id="unit-km" aria-pressed="true">km</button>
+        <button type="button" id="unit-mi" aria-pressed="false">mi</button>
+      </div>
+      <button type="button" class="btn" id="export-btn">Export</button>
+      <button type="button" class="btn" id="import-btn">Import</button>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2 id="form-title">Add a run</h2>
+    <p class="card-sub">Pace is worked out for you</p>
+    <form class="add-run" id="run-form" novalidate>
+      <div class="field">
+        <label for="f-date">Date</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="field">
+        <label for="f-dist" id="f-dist-label">Distance (km)</label>
+        <input type="text" id="f-dist" inputmode="decimal" placeholder="5.0" required>
+      </div>
+      <div class="field">
+        <label for="f-time">Time (h:mm:ss or mm:ss)</label>
+        <input type="text" id="f-time" inputmode="numeric" placeholder="27:30" required>
+      </div>
+      <div class="field field-notes">
+        <label for="f-notes">Notes (optional)</label>
+        <input type="text" id="f-notes" placeholder="Easy run along the river" maxlength="200">
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary" id="f-submit">Add run</button>
+        <button type="button" class="btn" id="f-cancel" hidden>Cancel</button>
+        <span class="form-error" id="f-error" role="alert"></span>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Weekly distance</h2>
+    <p class="card-sub" id="chart-sub">Last 12 weeks · km</p>
+    <div class="chart-wrap" id="chart-wrap">
+      <div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>History</h2>
+    <p class="card-sub" id="history-sub"></p>
+    <div class="table-scroll">
+      <table id="history-table" hidden>
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col" id="th-dist">Distance</th>
+            <th scope="col">Time</th>
+            <th scope="col" id="th-pace">Pace</th>
+            <th scope="col">Notes</th>
+            <th scope="col"><span class="sr-only"></span></th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+    <div class="table-empty" id="table-empty">No runs yet — add your first one above.</div>
+  </div>
+
+  <footer>Data is stored in this browser only. Use Export to back it up or move it to another device.</footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const KM_PER_MI = 1.609344;
+  const STORE_KEY = 'running-app.runs.v1';
+  const UNIT_KEY = 'running-app.unit';
+  const WEEKS_SHOWN = 12;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ---------- state ----------
+  let runs = loadRuns();          // [{id, date:'YYYY-MM-DD', km:Number, sec:Number, notes:String}]
+  let unit = localStorage.getItem(UNIT_KEY) === 'mi' ? 'mi' : 'km';
+  let editingId = null;
+
+  function loadRuns() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter(isValidRun) : [];
+    } catch { return []; }
+  }
+  function saveRuns() { localStorage.setItem(STORE_KEY, JSON.stringify(runs)); }
+  function isValidRun(r) {
+    return r && typeof r === 'object'
+      && typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date)
+      && Number.isFinite(r.km) && r.km > 0
+      && Number.isFinite(r.sec) && r.sec > 0;
+  }
+  function newId() {
+    return (crypto.randomUUID && crypto.randomUUID()) ||
+      ('r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  }
+
+  // ---------- formatting ----------
+  const pad2 = n => String(n).padStart(2, '0');
+  const toUnit = km => unit === 'km' ? km : km / KM_PER_MI;
+  const fromUnit = v => unit === 'km' ? v : v * KM_PER_MI;
+  const fmtDist = km => {
+    const v = toUnit(km);
+    return v >= 100 ? v.toFixed(0) : v.toFixed(1);
+  };
+  function fmtDur(sec) {
+    sec = Math.round(sec);
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${m}:${pad2(s)}`;
+  }
+  function fmtPace(secPer) {
+    if (!Number.isFinite(secPer) || secPer <= 0) return '–';
+    let m = Math.floor(secPer / 60), s = Math.round(secPer % 60);
+    if (s === 60) { m += 1; s = 0; }
+    return `${m}:${pad2(s)}`;
+  }
+  function parseDuration(str) {
+    const parts = String(str).trim().split(':');
+    if (parts.length < 1 || parts.length > 3 || parts.some(p => p === '' || !/^\d+$/.test(p))) return null;
+    const nums = parts.map(Number);
+    let sec = 0;
+    if (nums.length === 1) sec = nums[0] * 60;                       // "45" → 45 min
+    if (nums.length === 2) sec = nums[0] * 60 + nums[1];             // mm:ss
+    if (nums.length === 3) sec = nums[0] * 3600 + nums[1] * 60 + nums[2]; // h:mm:ss
+    return sec > 0 ? sec : null;
+  }
+  function parseLocalDate(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  function isoOf(date) {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  }
+  const fmtShortDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const fmtFullDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // ---------- weeks ----------
+  function weekStartOf(date) {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
+    return d;
+  }
+  function buildWeeks() {
+    const thisWeek = weekStartOf(new Date());
+    const weeks = [];
+    const byKey = new Map();
+    for (let i = WEEKS_SHOWN - 1; i >= 0; i--) {
+      const start = new Date(thisWeek);
+      start.setDate(start.getDate() - i * 7);
+      const w = { start, km: 0, count: 0 };
+      weeks.push(w);
+      byKey.set(isoOf(start), w);
+    }
+    for (const r of runs) {
+      const w = byKey.get(isoOf(weekStartOf(parseLocalDate(r.date))));
+      if (w) { w.km += r.km; w.count += 1; }
+    }
+    return weeks;
+  }
+
+  // ---------- stat tiles ----------
+  function renderTiles() {
+    const el = document.getElementById('tiles');
+    el.textContent = '';
+    const totalKm = runs.reduce((a, r) => a + r.km, 0);
+    const totalSec = runs.reduce((a, r) => a + r.sec, 0);
+    const thisWeekKey = isoOf(weekStartOf(new Date()));
+    const weekKm = runs
+      .filter(r => isoOf(weekStartOf(parseLocalDate(r.date))) === thisWeekKey)
+      .reduce((a, r) => a + r.km, 0);
+    const longest = runs.length ? Math.max(...runs.map(r => r.km)) : 0;
+    const bestPace = runs.length ? Math.min(...runs.map(r => r.sec / toUnit(r.km))) : NaN;
+    const avgPace = totalKm > 0 ? totalSec / toUnit(totalKm) : NaN;
+
+    const tiles = [
+      { label: 'This week', value: fmtDist(weekKm), unit },
+      { label: 'Total distance', value: fmtDist(totalKm), unit },
+      { label: 'Runs', value: String(runs.length) },
+      { label: 'Total time', value: runs.length ? fmtDur(totalSec) : '–' },
+      { label: 'Avg pace', value: fmtPace(avgPace), unit: Number.isFinite(avgPace) ? '/' + unit : '' },
+      { label: 'Longest run', value: runs.length ? fmtDist(longest) : '–', unit: runs.length ? unit : '' },
+    ];
+    for (const t of tiles) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = t.label;
+      const value = document.createElement('div');
+      value.className = 'value';
+      value.textContent = t.value;
+      if (t.unit) {
+        const u = document.createElement('span');
+        u.className = 'unit';
+        u.textContent = t.unit;
+        value.appendChild(u);
+      }
+      tile.append(label, value);
+      el.appendChild(tile);
+    }
+  }
+
+  // ---------- chart ----------
+  const chartWrap = document.getElementById('chart-wrap');
+  const tooltip = document.getElementById('tooltip');
+
+  function niceMax(v) {
+    if (v <= 0) return 4;
+    const rough = v / 4;
+    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * pow).find(s => s * 4 >= v);
+    return (step || 10 * pow) * 4;
+  }
+  function svgEl(name, attrs) {
+    const el = document.createElementNS(SVGNS, name);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    return el;
+  }
+
+  function renderChart() {
+    chartWrap.querySelector('svg')?.remove();
+    chartWrap.querySelector('.chart-empty')?.remove();
+    document.getElementById('chart-sub').textContent = `Last 12 weeks · ${unit}`;
+
+    if (!runs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'chart-empty';
+      empty.textContent = 'Log your first run to see your weekly distance here.';
+      chartWrap.appendChild(empty);
+      return;
+    }
+
+    const weeks = buildWeeks();
+    const W = Math.max(320, chartWrap.clientWidth);
+    const H = 240, padL = 40, padR = 8, padT = 24, padB = 28;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const maxVal = niceMax(Math.max(...weeks.map(w => toUnit(w.km))));
+    const y0 = padT + plotH;
+
+    const svg = svgEl('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img' });
+    svg.setAttribute('aria-label', `Bar chart of weekly running distance over the last 12 weeks, in ${unit}`);
+
+    // gridlines + tick labels (0 line drawn as the baseline)
+    for (let i = 1; i <= 4; i++) {
+      const val = (maxVal / 4) * i;
+      const y = y0 - (val / maxVal) * plotH;
+      svg.appendChild(svgEl('line', { x1: padL, x2: W - padR, y1: y, y2: y, class: 'gridline' }));
+      const t = svgEl('text', { x: padL - 6, y: y + 4, 'text-anchor': 'end', class: 'tick-label' });
+      t.textContent = val % 1 === 0 ? String(val) : val.toFixed(1);
+      svg.appendChild(t);
+    }
+    svg.appendChild(svgEl('line', { x1: padL, x2: W - padR, y1: y0, y2: y0, class: 'axis-baseline' }));
+    const zero = svgEl('text', { x: padL - 6, y: y0 + 4, 'text-anchor': 'end', class: 'tick-label' });
+    zero.textContent = '0';
+    svg.appendChild(zero);
+
+    const slotW = plotW / WEEKS_SHOWN;
+    const barW = Math.min(24, slotW * 0.6);
+    const maxKm = Math.max(...weeks.map(w => w.km));
+
+    weeks.forEach((w, i) => {
+      const cx = padL + slotW * i + slotW / 2;
+      const val = toUnit(w.km);
+      const h = (val / maxVal) * plotH;
+      const x = cx - barW / 2;
+      const topY = y0 - h;
+
+      let bar = null;
+      if (h > 0.5) {
+        const r = Math.min(4, barW / 2, h);
+        // 4px rounded data-end at the top, square at the baseline
+        const d = `M${x},${y0} L${x},${topY + r} Q${x},${topY} ${x + r},${topY}` +
+                  ` L${x + barW - r},${topY} Q${x + barW},${topY} ${x + barW},${topY + r} L${x + barW},${y0} Z`;
+        bar = svgEl('path', { d, class: 'bar' });
+      }
+
+      // transparent hit target covering the whole slot — bigger than the mark
+      const hit = svgEl('rect', { x: padL + slotW * i, y: padT, width: slotW, height: plotH, class: 'hit', tabindex: '0' });
+      const weekLabel = `Week of ${fmtShortDate(w.start)}`;
+      const valueText = w.count
+        ? `${val >= 100 ? val.toFixed(0) : val.toFixed(1)} ${unit} · ${w.count} run${w.count > 1 ? 's' : ''}`
+        : 'No runs';
+      hit.setAttribute('role', 'img');
+      hit.setAttribute('aria-label', `${weekLabel}: ${valueText}`);
+
+      const show = () => {
+        if (bar) bar.classList.add('lift');
+        tooltip.textContent = '';
+        const v = document.createElement('div');
+        v.className = 'tt-value';
+        v.textContent = valueText;
+        const l = document.createElement('div');
+        l.className = 'tt-label';
+        l.textContent = weekLabel;
+        tooltip.append(v, l);
+        tooltip.style.visibility = 'visible';
+        tooltip.setAttribute('aria-hidden', 'false');
+        const ttW = tooltip.offsetWidth;
+        const left = Math.min(Math.max(cx - ttW / 2, 2), W - ttW - 2);
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = Math.max(0, (bar ? topY : y0 - 24) - tooltip.offsetHeight - 8) + 'px';
+      };
+      const hide = () => {
+        if (bar) bar.classList.remove('lift');
+        tooltip.style.visibility = 'hidden';
+        tooltip.setAttribute('aria-hidden', 'true');
+      };
+      hit.addEventListener('pointerenter', show);
+      hit.addEventListener('pointerleave', hide);
+      hit.addEventListener('focus', show);
+      hit.addEventListener('blur', hide);
+
+      svg.appendChild(hit);
+      if (bar) svg.appendChild(bar);
+
+      // selective direct label: only the biggest week gets a value on the cap
+      if (w.km > 0 && w.km === maxKm) {
+        const cap = svgEl('text', { x: cx, y: topY - 6, 'text-anchor': 'middle', class: 'cap-label' });
+        cap.textContent = val >= 100 ? val.toFixed(0) : val.toFixed(1);
+        svg.appendChild(cap);
+      }
+      // x labels on alternating weeks to avoid crowding
+      if (i % 2 === (WEEKS_SHOWN - 1) % 2) {
+        const xl = svgEl('text', { x: cx, y: H - 8, 'text-anchor': 'middle', class: 'x-label' });
+        xl.textContent = fmtShortDate(w.start);
+        svg.appendChild(xl);
+      }
+    });
+
+    chartWrap.appendChild(svg);
+  }
+
+  let resizeQueued = false;
+  new ResizeObserver(() => {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(() => { resizeQueued = false; renderChart(); });
+  }).observe(chartWrap);
+
+  // ---------- history table ----------
+  function renderTable() {
+    const table = document.getElementById('history-table');
+    const body = document.getElementById('history-body');
+    const empty = document.getElementById('table-empty');
+    const sub = document.getElementById('history-sub');
+    body.textContent = '';
+    document.getElementById('th-dist').textContent = `Distance (${unit})`;
+    document.getElementById('th-pace').textContent = `Pace (/${unit})`;
+    sub.textContent = runs.length ? `${runs.length} run${runs.length > 1 ? 's' : ''} logged` : '';
+    table.hidden = !runs.length;
+    empty.hidden = !!runs.length;
+
+    const sorted = [...runs].sort((a, b) => b.date.localeCompare(a.date));
+    for (const r of sorted) {
+      const tr = document.createElement('tr');
+
+      const tdDate = document.createElement('td');
+      tdDate.textContent = fmtFullDate(parseLocalDate(r.date));
+
+      const tdDist = document.createElement('td');
+      tdDist.className = 'num';
+      tdDist.textContent = fmtDist(r.km);
+
+      const tdTime = document.createElement('td');
+      tdTime.className = 'num';
+      tdTime.textContent = fmtDur(r.sec);
+
+      const tdPace = document.createElement('td');
+      tdPace.className = 'num';
+      tdPace.textContent = fmtPace(r.sec / toUnit(r.km));
+
+      const tdNotes = document.createElement('td');
+      tdNotes.className = 'notes-cell';
+      tdNotes.textContent = r.notes || '';
+      if (r.notes) tdNotes.title = r.notes;
+
+      const tdActions = document.createElement('td');
+      tdActions.className = 'actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-text';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => startEdit(r.id));
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-text danger';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', () => {
+        if (confirm('Delete this run?')) {
+          runs = runs.filter(x => x.id !== r.id);
+          if (editingId === r.id) resetForm();
+          saveRuns();
+          renderAll();
+        }
+      });
+      tdActions.append(editBtn, delBtn);
+
+      tr.append(tdDate, tdDist, tdTime, tdPace, tdNotes, tdActions);
+      body.appendChild(tr);
+    }
+  }
+
+  // ---------- form ----------
+  const form = document.getElementById('run-form');
+  const fDate = document.getElementById('f-date');
+  const fDist = document.getElementById('f-dist');
+  const fTime = document.getElementById('f-time');
+  const fNotes = document.getElementById('f-notes');
+  const fError = document.getElementById('f-error');
+  const fSubmit = document.getElementById('f-submit');
+  const fCancel = document.getElementById('f-cancel');
+
+  function resetForm() {
+    editingId = null;
+    form.reset();
+    fDate.value = isoOf(new Date());
+    fError.textContent = '';
+    fSubmit.textContent = 'Add run';
+    fCancel.hidden = true;
+    document.getElementById('form-title').textContent = 'Add a run';
+  }
+  function startEdit(id) {
+    const r = runs.find(x => x.id === id);
+    if (!r) return;
+    editingId = id;
+    fDate.value = r.date;
+    fDist.value = fmtDist(r.km);
+    fTime.value = fmtDur(r.sec);
+    fNotes.value = r.notes || '';
+    fError.textContent = '';
+    fSubmit.textContent = 'Save changes';
+    fCancel.hidden = false;
+    document.getElementById('form-title').textContent = 'Edit run';
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    fDist.focus();
+  }
+  fCancel.addEventListener('click', resetForm);
+
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    fError.textContent = '';
+
+    const date = fDate.value;
+    const distVal = parseFloat(String(fDist.value).replace(',', '.'));
+    const sec = parseDuration(fTime.value);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { fError.textContent = 'Pick a date.'; return; }
+    if (!Number.isFinite(distVal) || distVal <= 0) { fError.textContent = 'Distance must be a number above 0.'; return; }
+    if (sec === null) { fError.textContent = 'Time should look like 27:30 or 1:05:00.'; return; }
+
+    const km = fromUnit(distVal);
+    const notes = fNotes.value.trim();
+
+    if (editingId) {
+      const r = runs.find(x => x.id === editingId);
+      if (r) Object.assign(r, { date, km, sec, notes });
+    } else {
+      runs.push({ id: newId(), date, km, sec, notes });
+    }
+    saveRuns();
+    resetForm();
+    renderAll();
+  });
+
+  // ---------- unit toggle ----------
+  const kmBtn = document.getElementById('unit-km');
+  const miBtn = document.getElementById('unit-mi');
+  function setUnit(u) {
+    unit = u;
+    localStorage.setItem(UNIT_KEY, u);
+    kmBtn.setAttribute('aria-pressed', String(u === 'km'));
+    miBtn.setAttribute('aria-pressed', String(u === 'mi'));
+    document.getElementById('f-dist-label').textContent = `Distance (${u})`;
+    renderAll();
+  }
+  kmBtn.addEventListener('click', () => setUnit('km'));
+  miBtn.addEventListener('click', () => setUnit('mi'));
+
+  // ---------- export / import ----------
+  document.getElementById('export-btn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify({ app: 'running-app', version: 1, runs }, null, 2)],
+      { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `running-log-${isoOf(new Date())}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  const importFile = document.getElementById('import-file');
+  document.getElementById('import-btn').addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', () => {
+    const file = importFile.files[0];
+    importFile.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const incoming = (Array.isArray(data) ? data : data.runs || []).filter(isValidRun);
+        if (!incoming.length) { alert('No valid runs found in that file.'); return; }
+        const byId = new Map(runs.map(r => [r.id, r]));
+        let added = 0;
+        for (const r of incoming) {
+          const id = r.id || newId();
+          if (!byId.has(id)) added++;
+          byId.set(id, { id, date: r.date, km: r.km, sec: r.sec, notes: typeof r.notes === 'string' ? r.notes : '' });
+        }
+        runs = [...byId.values()];
+        saveRuns();
+        renderAll();
+        alert(`Imported ${incoming.length} runs (${added} new).`);
+      } catch {
+        alert('That file could not be read as a running log export.');
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------- boot ----------
+  function renderAll() {
+    renderTiles();
+    renderChart();
+    renderTable();
+  }
+  setUnit(unit);
+  resetForm();
+})();
+</script>
+</body>
+</html>
