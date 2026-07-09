@@ -55,6 +55,13 @@ browser.newContext({ geolocation: {latitude, longitude}, permissions: ['geolocat
   heatmap (`rect.heat-cell`, dark ramp under dark theme — assert no `#efeeea`
   fills). Tooltips on hover; pace chart also arrow-keys when focused.
 
+- Strava: drive with a node server that serves the repo AND mocks
+  `/api/strava/config` + `/api/strava/token` on one origin (mirrors the Vercel
+  deploy), then `page.route('https://www.strava.com/**')` — fulfill
+  `/oauth/authorize` with a 302 back to `redirect_uri?state=strava&code=…` and
+  `/api/v3/athlete/activities` with fixtures (CORS header required). Rides must
+  be filtered out; re-sync must dedupe by stravaId.
+
 ## Gotchas
 
 - Delete/wipe use `confirm()` — register a Playwright dialog handler first.

@@ -72,6 +72,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html { height: 100%; }
   body {
     margin: 0; min-height: 100%;
@@ -451,6 +452,27 @@
     </div>
 
     <div class="card">
+      <h2>Strava</h2>
+      <p class="card-sub">Pull your runs in automatically — each person connects their own account</p>
+      <div class="setting-row">
+        <div class="info">
+          <div class="name" id="strava-status">Not connected</div>
+          <div class="desc" id="strava-detail">Runs sync from your Strava account into this browser.</div>
+        </div>
+        <button type="button" class="btn-primary" id="strava-connect">Connect Strava</button>
+        <button type="button" class="btn" id="strava-sync" hidden>Sync now</button>
+        <button type="button" class="btn" id="strava-disconnect" hidden>Disconnect</button>
+      </div>
+      <div class="setting-row" id="strava-proxy-row">
+        <div class="info">
+          <div class="name">Strava proxy</div>
+          <div class="desc">Only needed on GitHub Pages — paste your Vercel URL (see STRAVA_SETUP.md in the repo)</div>
+        </div>
+        <input type="url" id="strava-proxy" placeholder="https://your-app.vercel.app" style="flex:1; min-width:220px; font:inherit; color:var(--text-primary); background:var(--page); border:1px solid var(--border); border-radius:8px; padding:7px 10px;">
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Data</h2>
       <p class="card-sub">Runs live in this browser only — export to back up or move devices</p>
       <div class="setting-row">
@@ -573,6 +595,7 @@
       unit: s.unit === 'mi' || (!s.unit && legacyUnit === 'mi') ? 'mi' : 'km',
       theme: ['light', 'dark'].includes(s.theme) ? s.theme : 'system',
       goalKm: Number.isFinite(s.goalKm) && s.goalKm > 0 ? s.goalKm : 20,
+      stravaProxy: typeof s.stravaProxy === 'string' ? s.stravaProxy : '',
     };
   }
   function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
@@ -1525,6 +1548,7 @@
             type: TYPES.includes(r.type) ? r.type : 'easy',
             effort: Number.isFinite(r.effort) ? r.effort : null,
             route: Array.isArray(r.route) ? r.route : null,
+            stravaId: r.stravaId ?? null,
           });
         }
         runs = [...byId.values()];
@@ -1568,6 +1592,9 @@
     localStorage.removeItem(RUNS_KEY);
     localStorage.removeItem(SETTINGS_KEY);
     localStorage.removeItem('running-app.unit');
+    localStorage.removeItem(STRAVA_KEY);
+    localStorage.removeItem(STRAVA_PENDING_KEY);
+    strava = null;
     runs = [];
     settings = loadSettings();
     applyTheme();
@@ -1612,6 +1639,198 @@
     syncGoalInput();
   });
 
+  // ---------- Strava sync ----------
+  const STRAVA_KEY = 'running-app.strava.v1';
+  const STRAVA_PENDING_KEY = 'running-app.strava.pending';
+  let strava = null;
+  try { strava = JSON.parse(localStorage.getItem(STRAVA_KEY) || 'null'); } catch { strava = null; }
+  function saveStrava() {
+    if (strava) localStorage.setItem(STRAVA_KEY, JSON.stringify(strava));
+    else localStorage.removeItem(STRAVA_KEY);
+  }
+
+  function decodePolyline(str) {
+    let i = 0, lat = 0, lng = 0;
+    const out = [];
+    while (i < str.length) {
+      for (const which of [0, 1]) {
+        let b, shift = 0, result = 0;
+        do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+        const delta = (result & 1) ? ~(result >> 1) : (result >> 1);
+        if (which === 0) lat += delta; else lng += delta;
+      }
+      out.push([lat / 1e5, lng / 1e5]);
+    }
+    return out;
+  }
+
+  async function stravaResolveProxy() {
+    // Same-origin functions (Vercel deploy of this repo) first, then the configured proxy.
+    const candidates = [];
+    if (location.protocol !== 'file:') candidates.push('api/strava');
+    if (settings.stravaProxy) candidates.push(settings.stravaProxy.replace(/\/+$/, '') + '/api/strava');
+    for (const base of candidates) {
+      try {
+        const r = await fetch(base + '/config');
+        if (r.ok) {
+          const { clientId } = await r.json();
+          if (clientId) return { base, clientId };
+        }
+      } catch { /* try next */ }
+    }
+    return null;
+  }
+
+  function stravaMapActivity(a) {
+    const dist = Number(a.distance), sec = Number(a.moving_time);
+    if (!Number.isFinite(dist) || dist <= 0 || !Number.isFinite(sec) || sec <= 0) return null;
+    const sport = a.sport_type || a.type || '';
+    if (!/run/i.test(sport)) return null;
+    const typeMap = { 1: 'race', 2: 'long', 3: 'tempo' };
+    const poly = a.map && a.map.summary_polyline;
+    return {
+      id: newId(),
+      stravaId: a.id,
+      date: String(a.start_date_local || a.start_date || '').slice(0, 10),
+      km: dist / 1000,
+      sec,
+      notes: typeof a.name === 'string' ? a.name : '',
+      type: typeMap[a.workout_type] || 'easy',
+      effort: null,
+      route: poly ? decimate(decodePolyline(poly), 400) : null,
+    };
+  }
+
+  async function stravaRefreshIfNeeded() {
+    if (!strava) throw new Error('not connected');
+    if (strava.expires_at * 1000 - 60000 > Date.now()) return;
+    const r = await fetch(strava.base + '/token', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refresh_token: strava.refresh_token }),
+    });
+    if (!r.ok) throw new Error('token refresh failed');
+    const t = await r.json();
+    Object.assign(strava, {
+      access_token: t.access_token, refresh_token: t.refresh_token, expires_at: t.expires_at,
+    });
+    saveStrava();
+  }
+
+  async function stravaSync(manual) {
+    if (!strava) return;
+    const btn = document.getElementById('strava-sync');
+    btn.disabled = true;
+    try {
+      await stravaRefreshIfNeeded();
+      const have = new Set(runs.map(r => r.stravaId).filter(Boolean));
+      const found = [];
+      for (let pageN = 1; pageN <= 4; pageN++) {
+        const r = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=50&page=${pageN}`,
+          { headers: { Authorization: 'Bearer ' + strava.access_token } });
+        if (!r.ok) throw new Error('Strava API error ' + r.status);
+        const batch = await r.json();
+        if (!Array.isArray(batch) || !batch.length) break;
+        for (const a of batch) {
+          const run = stravaMapActivity(a);
+          if (run && isValidRun(run) && !have.has(run.stravaId)) found.push(run);
+        }
+        if (batch.length < 50) break;
+      }
+      if (found.length) {
+        runs.push(...found);
+        saveRuns();
+        renderAll();
+      }
+      strava.lastSync = Date.now();
+      saveStrava();
+      renderStrava();
+      if (manual || found.length) {
+        toast(found.length ? `Synced ${found.length} run${found.length > 1 ? 's' : ''} from Strava` : 'Strava: already up to date');
+      }
+    } catch (err) {
+      if (manual) toast('Strava sync failed — try reconnecting.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderStrava() {
+    const status = document.getElementById('strava-status');
+    const detail = document.getElementById('strava-detail');
+    const connected = !!strava;
+    document.getElementById('strava-connect').hidden = connected;
+    document.getElementById('strava-sync').hidden = !connected;
+    document.getElementById('strava-disconnect').hidden = !connected;
+    document.getElementById('strava-proxy-row').hidden = connected;
+    if (connected) {
+      const who = strava.athlete ? `${strava.athlete.firstname || ''} ${strava.athlete.lastname || ''}`.trim() : 'your account';
+      status.textContent = `Connected as ${who}`;
+      detail.textContent = strava.lastSync
+        ? `Last synced ${new Date(strava.lastSync).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+        : 'Connected — runs sync on open, or use Sync now.';
+    } else {
+      status.textContent = 'Not connected';
+      detail.textContent = 'Runs sync from your Strava account into this browser.';
+    }
+  }
+
+  document.getElementById('strava-connect').addEventListener('click', async () => {
+    const cfg = await stravaResolveProxy();
+    if (!cfg) {
+      toast('Strava needs its helper function — see STRAVA_SETUP.md, then paste your Vercel URL below.');
+      document.getElementById('strava-proxy').focus();
+      return;
+    }
+    localStorage.setItem(STRAVA_PENDING_KEY, cfg.base);
+    const redirect = location.origin + location.pathname;
+    location.href = 'https://www.strava.com/oauth/authorize' +
+      `?client_id=${encodeURIComponent(cfg.clientId)}` +
+      `&redirect_uri=${encodeURIComponent(redirect)}` +
+      '&response_type=code&approval_prompt=auto&scope=activity:read_all&state=strava';
+  });
+  document.getElementById('strava-sync').addEventListener('click', () => stravaSync(true));
+  document.getElementById('strava-disconnect').addEventListener('click', () => {
+    strava = null;
+    saveStrava();
+    renderStrava();
+    toast('Strava disconnected — synced runs stay in your log.');
+  });
+  const proxyInput = document.getElementById('strava-proxy');
+  proxyInput.value = settings.stravaProxy || '';
+  proxyInput.addEventListener('change', () => {
+    settings.stravaProxy = proxyInput.value.trim();
+    saveSettings();
+  });
+
+  async function stravaHandleCallback() {
+    const params = new URLSearchParams(location.search);
+    if (params.get('state') !== 'strava' || !params.get('code')) return;
+    const base = localStorage.getItem(STRAVA_PENDING_KEY);
+    history.replaceState(null, '', location.pathname + location.hash);
+    localStorage.removeItem(STRAVA_PENDING_KEY);
+    if (!base) return;
+    try {
+      const r = await fetch(base + '/token', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: params.get('code') }),
+      });
+      if (!r.ok) throw new Error('exchange failed');
+      const t = await r.json();
+      strava = {
+        base,
+        access_token: t.access_token, refresh_token: t.refresh_token, expires_at: t.expires_at,
+        athlete: t.athlete ? { id: t.athlete.id, firstname: t.athlete.firstname, lastname: t.athlete.lastname } : null,
+        lastSync: null,
+      };
+      saveStrava();
+      renderStrava();
+      toast('Strava connected — syncing your runs…');
+      await stravaSync(true);
+    } catch {
+      toast('Strava connection failed — try again.');
+    }
+  }
+
   // ---------- navigation ----------
   const tabs = [...document.querySelectorAll('nav.tabs button')];
   function setView(name, push) {
@@ -1645,6 +1864,8 @@
       renderHistory();
     } else if (currentView === 'record') {
       recUpdateUI();
+    } else if (currentView === 'settings') {
+      renderStrava();
     }
   }
   function renderAll() { renderView(); }
@@ -1664,6 +1885,9 @@
   syncGoalInput();
   setUnit(settings.unit);
   setView(location.hash.slice(1) || 'home', false);
+  renderStrava();
+  stravaHandleCallback();
+  if (strava && (!strava.lastSync || Date.now() - strava.lastSync > 3600e3)) stravaSync(false);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
