@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#2a78d6"/>
+  <g stroke="#ffffff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- torso, leaning forward -->
+    <path d="M300 176 L246 300"/>
+    <!-- front arm reaching forward -->
+    <path d="M292 196 L368 218"/>
+    <!-- back arm swinging behind -->
+    <path d="M296 210 L226 176"/>
+    <!-- front leg: knee up, foot striking forward -->
+    <path d="M246 300 L330 342 L336 428"/>
+    <!-- back leg trailing -->
+    <path d="M246 300 L186 366 L118 358"/>
+  </g>
+  <!-- head -->
+  <circle cx="322" cy="118" r="42" fill="#ffffff"/>
+  <!-- motion dashes -->
+  <g stroke="#ffffff" stroke-width="22" stroke-linecap="round" opacity="0.55">
+    <path d="M96 208 L156 208"/>
+    <path d="M74 260 L134 260"/>
+  </g>
+</svg>
