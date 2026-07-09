@@ -1,5 +1,11 @@
 # Strava sync — one-time setup (~5 minutes)
 
+> **Heads-up:** Strava now requires the account that *creates* the API app to
+> have a paid Strava subscription. Your friends who connect never need one —
+> only the app owner. Without a subscription the form at
+> strava.com/settings/api stays locked, and the Connect button in the app
+> stays dormant (GPX import keeps working for everyone regardless).
+
 The app is static; Strava's OAuth needs one tiny server-side function to keep
 the client secret private. This repo already contains it (`api/strava/`) — you
 just deploy the repo to Vercel and create a Strava API app.

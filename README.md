@@ -20,7 +20,9 @@ no accounts, no server, no tracking. Installable as an app on your phone.
   celebrated when you log them.
 - **History** with month grouping and totals, search, and type filters.
 - **Strava sync** — a Connect Strava button pulls your runs (with routes) in
-  automatically; one-time setup in [STRAVA_SETUP.md](STRAVA_SETUP.md).
+  automatically; one-time setup in [STRAVA_SETUP.md](STRAVA_SETUP.md). Note:
+  Strava requires the app owner (not the connecting friends) to hold a Strava
+  subscription for API access, so this stays dormant until then.
 - **GPX import** — bring in runs from Strava, Garmin, or any GPS watch export.
 - **Backup** — JSON export/import (works across devices) and CSV export.
 - **Installable PWA** — add to your home screen and it works offline.
