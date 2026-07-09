@@ -595,7 +595,7 @@
       unit: s.unit === 'mi' || (!s.unit && legacyUnit === 'mi') ? 'mi' : 'km',
       theme: ['light', 'dark'].includes(s.theme) ? s.theme : 'system',
       goalKm: Number.isFinite(s.goalKm) && s.goalKm > 0 ? s.goalKm : 20,
-      stravaProxy: typeof s.stravaProxy === 'string' ? s.stravaProxy : '',
+      stravaProxy: typeof s.stravaProxy === 'string' ? s.stravaProxy : 'https://running-app-jade-eta.vercel.app',
     };
   }
   function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }

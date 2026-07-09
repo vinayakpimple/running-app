@@ -3,7 +3,9 @@
 A private, offline-first running tracker that runs entirely in your browser —
 no accounts, no server, no tracking. Installable as an app on your phone.
 
-**Live:** https://vinayakpimple.github.io/running-app/
+**Live:** https://running-app-jade-eta.vercel.app (also mirrored at
+https://vinayakpimple.github.io/running-app/ — note that run data is stored
+per site in your browser, so pick one and stick with it)
 
 ## Features
 
